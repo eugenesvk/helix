@@ -4861,18 +4861,21 @@ enum Paste {
 }
 
 fn paste_impl(
-    values: &[String],
-    doc: &mut Document,
-    view: &View,
-    action: Paste,
-    count: usize,
+    values	: &[String],
+    doc   	: &mut Document,
+    view  	: &View,
+    action	: Paste,
+    count 	: usize,
 ) -> Option<Transaction> {
+    let valength	= values.len(); // copied values
+
     let repeat = std::iter::repeat(
         values
             .last()
             .map(|value| Tendril::from(value.repeat(count)))
             .unwrap(),
     );
+    // let default_sep = Cow::Borrowed(doc.line_ending.as_str());
 
     // if any of values ends with a line ending, it's linewise paste
     let linewise = values
@@ -4881,29 +4884,39 @@ fn paste_impl(
 
     // Only compiled once.
     #[allow(clippy::trivial_regex)]
-    static REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\r\n|\r|\n").unwrap());
+    // static REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\r\n|\r|\n").unwrap());
+    let REGEX = Regex::new(r"\r\n|\r|\n").unwrap();
     let mut values = values
         .iter()
         .map(|value| REGEX.replace_all(value, doc.line_ending.as_str()))
         .map(|value| Tendril::from(value.as_ref().repeat(count)))
         .chain(repeat);
 
-    let text = doc.text();
-    let selection = doc.selection(view.id);
+    let text     	= doc.text();
+    let selection	= doc.selection(view.id);
+    let selength 	= selection.len(); //target selection
+    if selength  	 == 1 {
+        println!("selength={}, valength={}"
+                 , selength  , valength);
+        dbg!(&selength);
+        // let mut values = values.join(&default_sep);
+        // let joined = values.join(&default_sep);
+
+    } else {
+        println!("selength={}, valength={}"
+                 , selength  , valength);
+        dbg!(&selength);
+    }
 
     let transaction = Transaction::change_by_selection(text, selection, |range| {
-        let pos = match (action, linewise) {
-            // paste linewise before
+        let pos = match (action, linewise) { // linewise paste ↓
             (Paste::Before, true) => text.line_to_char(text.char_to_line(range.from())),
-            // paste linewise after
-            (Paste::After, true) => {
+            (Paste::After , true) => {
                 let line = range.line_range(text.slice(..)).1;
                 text.line_to_char((line + 1).min(text.len_lines()))
-            }
-            // paste insert
-            (Paste::Before, false) => range.from(),
-            // paste append
-            (Paste::After, false) => range.to(),
+            } // regular paste ↓
+            (Paste::Before, false) => range.from(), // paste insert
+            (Paste::After , false) => range.to()  , // paste append
         };
         (pos, pos, values.next())
     });
@@ -4911,6 +4924,35 @@ fn paste_impl(
     Some(transaction)
 }
 
+fn paste_after(cx: &mut Context) {
+    let count = cx.count();
+    let reg_name = cx.register.unwrap_or('"');
+    let (view, doc) = current!(cx.editor);
+    let registers = &mut cx.editor.registers;
+
+    if let Some(transaction) = registers
+        .read(reg_name)
+        .and_then(|values| paste_impl(values, doc, view, Paste::After, count))
+    {
+        doc.apply(&transaction, view.id);
+        doc.append_changes_to_history(view.id);
+    }
+}
+
+fn paste_before(cx: &mut Context) {
+    let count = cx.count();
+    let reg_name = cx.register.unwrap_or('"');
+    let (view, doc) = current!(cx.editor);
+    let registers = &mut cx.editor.registers;
+
+    if let Some(transaction) = registers
+        .read(reg_name)
+        .and_then(|values| paste_impl(values, doc, view, Paste::Before, count))
+    {
+        doc.apply(&transaction, view.id);
+        doc.append_changes_to_history(view.id);
+    }
+}
 fn paste_clipboard_impl(
     editor: &mut Editor,
     action: Paste,
@@ -5035,36 +5077,6 @@ fn replace_selections_with_clipboard(cx: &mut Context) {
 
 fn replace_selections_with_primary_clipboard(cx: &mut Context) {
     let _ = replace_selections_with_clipboard_impl(cx.editor, ClipboardType::Selection, cx.count());
-}
-
-fn paste_after(cx: &mut Context) {
-    let count = cx.count();
-    let reg_name = cx.register.unwrap_or('"');
-    let (view, doc) = current!(cx.editor);
-    let registers = &mut cx.editor.registers;
-
-    if let Some(transaction) = registers
-        .read(reg_name)
-        .and_then(|values| paste_impl(values, doc, view, Paste::After, count))
-    {
-        doc.apply(&transaction, view.id);
-        doc.append_changes_to_history(view.id);
-    }
-}
-
-fn paste_before(cx: &mut Context) {
-    let count = cx.count();
-    let reg_name = cx.register.unwrap_or('"');
-    let (view, doc) = current!(cx.editor);
-    let registers = &mut cx.editor.registers;
-
-    if let Some(transaction) = registers
-        .read(reg_name)
-        .and_then(|values| paste_impl(values, doc, view, Paste::Before, count))
-    {
-        doc.apply(&transaction, view.id);
-        doc.append_changes_to_history(view.id);
-    }
 }
 
 fn get_lines(doc: &Document, view_id: ViewId) -> Vec<usize> {
